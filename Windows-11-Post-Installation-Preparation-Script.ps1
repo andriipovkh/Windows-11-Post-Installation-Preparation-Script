@@ -25,9 +25,16 @@ Disable-ComputerRestore -drive "C:\"
 # 2. Display Scale (Set to 100% / 96 DPI)
 # ------------------------------------------------------------------------------
 Write-Host "Setting Display Scale to 100%..." -ForegroundColor Green
-Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "LogPixels" -Value 96 -Type DWord
-Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "Win8DpiScaling" -Value 1 -Type DWord
-Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "DesktopDPIOverride" -Value 0 -Type DWord
+# Set standard scaling to 100% (0) for all known monitors
+$MonitorSettings = "HKCU:\Control Panel\Desktop\PerMonitorSettings"
+if (Test-Path $MonitorSettings) {
+    Get-ChildItem -Path $MonitorSettings | ForEach-Object {
+        Set-ItemProperty -Path $_.PSPath -Name "DpiValue" -Value 0 -Type DWord
+    }
+}
+# Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "LogPixels" -Value 96 -Type DWord
+# Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "Win8DpiScaling" -Value 1 -Type DWord
+# Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "DesktopDPIOverride" -Value 0 -Type DWord
 
 # ------------------------------------------------------------------------------
 # 3. Personalization (Spotlight, Dark Mode, Green Accent)
@@ -35,9 +42,10 @@ Set-ItemProperty -Path "HKCU:\Control Panel\Desktop" -Name "DesktopDPIOverride" 
 Write-Host "Applying Theme (Dark Mode, Green Accent, Windows Spotlight)..." -ForegroundColor Green
 
 # Desktop Background to Windows Spotlight
-$WallpaperPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers"
-if (-not (Test-Path $WallpaperPath)) { New-Item -Path $WallpaperPath -Force | Out-Null }
-Set-ItemProperty -Path $WallpaperPath -Name "BackgroundType" -Value 3 -Type DWord
+$WallpapersPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Wallpapers"
+if (-not (Test-Path $WallpapersPath)) { New-Item -Path $WallpapersPath -Force | Out-Null }
+Set-ItemProperty -Path $WallpapersPath -Name "BackgroundType" -Value 3 -Type DWord
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\ContentDeliveryManager" -Name "SubscribedContent-88000326Enabled" -Value 1 -Type DWord
 
 # Dark Mode (Apps & System)
 $PersonalizePath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize"
@@ -109,20 +117,28 @@ Set-ItemProperty -Path $CursorsPath -Name "UpArrow" -Value "%SystemRoot%\cursors
 Set-ItemProperty -Path $CursorsPath -Name "Hand" -Value "%SystemRoot%\cursors\hand_i.cur"
 
 # Enhance Pointer Precision = Off & Mouse Speed = 7
-$MousePath = "HKCU:\Control Panel\Mouse"
-Set-ItemProperty -Path $MousePath -Name "MouseSpeed" -Value "0"
-Set-ItemProperty -Path $MousePath -Name "MouseThreshold1" -Value "0"
-Set-ItemProperty -Path $MousePath -Name "MouseThreshold2" -Value "0"
-Set-ItemProperty -Path $MousePath -Name "MouseSensitivity" -Value "7"
-
-# Force Windows to reload mouse parameters live
 $CSharpSig = @'
 [DllImport("user32.dll", SetLastError = true)]
 public static extern bool SystemParametersInfo(uint action, uint param, IntPtr vparam, uint init);
+
+[DllImport("user32.dll", SetLastError = true)]
+public static extern bool SystemParametersInfo(uint action, uint param, int[] vparam, uint init);
 '@
 $User32 = Add-Type -MemberDefinition $CSharpSig -Name "User32Mouse" -Namespace "Win32" -PassThru
-$User32::SystemParametersInfo(0x0057, 0, [IntPtr]::Zero, 0x01 -bor 0x02) | Out-Null # SPI_SETCURSORS
-$User32::SystemParametersInfo(0x0071, 0, [IntPtr]7, 0x01 -bor 0x02) | Out-Null     # SPI_SETMOUSESPEED
+
+# Apply Speed (7)
+Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseSensitivity" -Value "7"
+$User32::SystemParametersInfo(0x0071, 0, [IntPtr]7, 0x01 -bor 0x02) | Out-Null
+
+# Disable Enhance Pointer Precision
+Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseSpeed" -Value "0"
+Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseThreshold1" -Value "0"
+Set-ItemProperty -Path "HKCU:\Control Panel\Mouse" -Name "MouseThreshold2" -Value "0"
+
+# Apply acceleration disable immediately via API
+[int[]]$mouseParams = @(0, 0, 0)
+$User32::SystemParametersInfo(0x0004, 0, $mouseParams, 0x01 -bor 0x02) | Out-Null
+
 
 # ------------------------------------------------------------------------------
 # 6. Taskbar & System Tray Settings
@@ -159,6 +175,14 @@ if (-not (Test-Path $PowerSettingsPath)) { New-Item -Path $PowerSettingsPath -Fo
 Set-ItemProperty -Path $PowerSettingsPath -Name "ShowBatteryPercentage" -Value 1 -Type DWord
 Set-ItemProperty -Path $AdvancedPath -Name "ShowBatteryPercentage" -Value 1 -Type DWord
 
+# Show all current system tray icons in Windows 11
+$NotifyIconPath = "HKCU:\Control Panel\NotifyIconSettings"
+if (Test-Path $NotifyIconPath) {
+    Get-ChildItem -Path $NotifyIconPath | ForEach-Object {
+        Set-ItemProperty -Path $_.PSPath -Name "IsPromoted" -Value 1 -Type DWord
+    }
+}
+
 # ------------------------------------------------------------------------------
 # 7. Default App Removal
 # ------------------------------------------------------------------------------
@@ -185,15 +209,15 @@ foreach ($App in $AppsToRemove) {
     Get-AppxProvisionedPackage -Online | Where-Object { $_.DisplayName -like "*$App*" } | Remove-AppxProvisionedPackage -Online -ErrorAction SilentlyContinue
 }
 
-# Restart Explorer to apply Shell and Registry visual changes immediately
-Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
-Start-Sleep -Seconds 2
+# Restart Explorer to apply Taskbar, Tray, Display Scale, and Spotlight registry changes
+Write-Host "Restarting Explorer to apply UI changes..." -ForegroundColor Yellow
+Stop-Process -Name explorer -Force
+Start-Sleep -Seconds 3
 
 # ------------------------------------------------------------------------------
 # 8. External Optimization & Telemetry Scripts
 # ------------------------------------------------------------------------------
 Write-Host "Executing External Debloat and Telemetry Reduction Scripts..." -ForegroundColor Cyan
-
 Invoke-Expression (Invoke-RestMethod "https://raw.githubusercontent.com/andriipovkh/Disable-Windows-11-telemetry/refs/heads/main/Windows11-Telemetry-Reduction-v2.2.ps1")
 Invoke-Expression (Invoke-RestMethod "https://raw.githubusercontent.com/andriipovkh/Windows-11-LTSC-Style-Debloat-RAM-Optimization/refs/heads/main/Windows-11-LTSC-Style-Debloat-and-RAM-Optimization.ps1")
 
@@ -201,7 +225,6 @@ Invoke-Expression (Invoke-RestMethod "https://raw.githubusercontent.com/andriipo
 # 9. Windows Update (Install PSWindowsUpdate Module and Run Updates)
 # ------------------------------------------------------------------------------
 Write-Host "Checking and Installing Windows Updates..." -ForegroundColor Cyan
-
 Set-ExecutionPolicy Bypass -Scope Process -Force
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
