@@ -53,13 +53,13 @@ if (-not (Test-Path $PersonalizePath)) { New-Item -Path $PersonalizePath -Force 
 Set-ItemProperty -Path $PersonalizePath -Name "AppsUseLightTheme" -Value 0 -Type DWord
 Set-ItemProperty -Path $PersonalizePath -Name "SystemUsesLightTheme" -Value 0 -Type DWord
 
-# Accent Color: Green (0xff10893e)
+# Color: Green 
 $AccentPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Accent"
 if (-not (Test-Path $AccentPath)) { New-Item -Path $AccentPath -Force | Out-Null }
-Set-ItemProperty -Path $AccentPath -Name "AccentColorMenu" -Value 0xff10893e -Type DWord
-Set-ItemProperty -Path $AccentPath -Name "StartColorMenu" -Value 0xff10893e -Type DWord
+Set-ItemProperty -Path $AccentPath -Name "AccentColorMenu" -Value 0xff107c10 -Type DWord
 Set-ItemProperty -Path $AccentPath -Name "AccentPalette" -Value ([byte[]](0x7a,0xc6,0x8b,0x00, 0x4c,0xaf,0x60,0x00, 0x10,0x89,0x3e,0x00, 0x0e,0x7a,0x37,0x00, 0x0b,0x60,0x2b,0x00, 0x08,0x49,0x21,0x00, 0x05,0x32,0x17,0x00, 0x00,0x00,0x00,0x00)) -Type Binary
-Set-ItemProperty -Path $PersonalizePath -Name "ColorPrevalence" -Value 1 -Type DWord
+Set-ItemProperty -Path $AccentPath -Name "StartColorMenu" -Value 0xff0e6d0e -Type DWord
+#Set-ItemProperty -Path $PersonalizePath -Name "ColorPrevalence" -Value 1 -Type DWord
 
 # ------------------------------------------------------------------------------
 # 4. Power Modes & Button / Lid Configurations
@@ -67,8 +67,24 @@ Set-ItemProperty -Path $PersonalizePath -Name "ColorPrevalence" -Value 1 -Type D
 Write-Host "Configuring Power Profiles, Sleep Timeouts, and Button Actions..." -ForegroundColor Green
 
 # Power Modes Slider: Plugged In = Best Performance, Battery = Best Power Efficiency
-powercfg /setacvalueindex SCHEME_CURRENT SUB_POWER OVERLAY_SCHEME_HIGH 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
-powercfg /setdcvalueindex SCHEME_CURRENT SUB_POWER OVERLAY_SCHEME_LOW 961b9f0e-4ab0-4796-9d1e-1929f06c00d4
+#powercfg /setacvalueindex SCHEME_CURRENT SUB_POWER OVERLAY_SCHEME_HIGH 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c
+#powercfg /setdcvalueindex SCHEME_CURRENT SUB_POWER OVERLAY_SCHEME_LOW 961b9f0e-4ab0-4796-9d1e-1929f06c00d4
+
+# Power Overlay Modes
+# Best Performance when Plugged in (Overlay scheme mode 0 = High Performance)
+powercfg /setacvalueindex SCHEME_CURRENT SUB_NONE OVERLAY_SCHEME_HIGH 0
+
+# Best Power Efficiency on Battery (Overlay scheme mode 0 = Max Battery Saver)
+powercfg /setdcvalueindex SCHEME_CURRENT SUB_NONE OVERLAY_SCHEME_MAX 0
+
+# Apply power configuration changes
+powercfg /setactive SCHEME_CURRENT
+
+# Turn ON Battery Percentage display on taskbar
+If (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage")) {
+    New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage" -Force | Out-Null
+}
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage" -Name "ShowBatteryPercentage" -Value 1 -Type DWord
 
 # Screen & System Sleep (Plugged In: Screen 30m, Sleep Never | Battery: Screen 30m, Sleep Never)
 powercfg /change monitor-timeout-ac 30
@@ -145,6 +161,9 @@ $User32::SystemParametersInfo(0x0004, 0, $mouseParams, 0x01 -bor 0x02) | Out-Nul
 # ------------------------------------------------------------------------------
 Write-Host "Configuring Taskbar Layout and System Tray Options..." -ForegroundColor Green
 $AdvancedPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+If (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced")) {
+    New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Force | Out-Null
+}
 
 # Search = Hide (0)
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Search" -Name "SearchboxTaskbarMode" -Value 0 -Type DWord
@@ -157,6 +176,9 @@ Set-ItemProperty -Path $AdvancedPath -Name "TaskbarDa" -Value 0 -Type DWord
 Set-ItemProperty -Path $AdvancedPath -Name "ShowRecommended" -Value 0 -Type DWord
 Set-ItemProperty -Path $AdvancedPath -Name "ShowResume" -Value 0 -Type DWord
 
+# Disable Taskbar Resume notification badges
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "TaskbarResume" -Value 0 -Type DWord
+
 # Show all system tray icons (EnableAutoTray = 0)
 Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer" -Name "EnableAutoTray" -Value 0 -Type DWord
 
@@ -168,6 +190,15 @@ Set-ItemProperty -Path $AdvancedPath -Name "TaskbarGlomLevel" -Value 1 -Type DWo
 
 # Show seconds in system tray clock = On (1)
 Set-ItemProperty -Path $AdvancedPath -Name "ShowSecondsInSystemClock" -Value 1 -Type DWord
+
+# Turn off recommended files in Start, recent files in File Explorer, and Jump Lists
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Start_TrackDocs" -Value 0 -Type DWord
+
+# Turn off recommendations for tips, shortcuts, new apps, and more
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Start_IrisRecommendations" -Value 0 -Type DWord
+
+# Turn off account-related notifications on Start
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name "Start_AccountNotifications" -Value 0 -Type DWord
 
 # Battery Percentage on Taskbar = On (1)
 $PowerSettingsPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\Power"
