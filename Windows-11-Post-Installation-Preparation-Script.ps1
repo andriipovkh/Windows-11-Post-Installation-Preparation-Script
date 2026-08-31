@@ -56,9 +56,9 @@ Set-ItemProperty -Path $PersonalizePath -Name "SystemUsesLightTheme" -Value 0 -T
 # Color: Green 
 $AccentPath = "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer\Accent"
 if (-not (Test-Path $AccentPath)) { New-Item -Path $AccentPath -Force | Out-Null }
-Set-ItemProperty -Path $AccentPath -Name "AccentColorMenu" -Value 0xff107c10 -Type DWord
-Set-ItemProperty -Path $AccentPath -Name "AccentPalette" -Value ([byte[]](0x7a,0xc6,0x8b,0x00, 0x4c,0xaf,0x60,0x00, 0x10,0x89,0x3e,0x00, 0x0e,0x7a,0x37,0x00, 0x0b,0x60,0x2b,0x00, 0x08,0x49,0x21,0x00, 0x05,0x32,0x17,0x00, 0x00,0x00,0x00,0x00)) -Type Binary
-Set-ItemProperty -Path $AccentPath -Name "StartColorMenu" -Value 0xff0e6d0e -Type DWord
+#Set-ItemProperty -Path $AccentPath -Name "AccentColorMenu" -Value 0xff107c10 -Type DWord
+#Set-ItemProperty -Path $AccentPath -Name "AccentPalette" -Value ([byte[]](0x7a,0xc6,0x8b,0x00, 0x4c,0xaf,0x60,0x00, 0x10,0x89,0x3e,0x00, 0x0e,0x7a,0x37,0x00, 0x0b,0x60,0x2b,0x00, 0x08,0x49,0x21,0x00, 0x05,0x32,0x17,0x00, 0x00,0x00,0x00,0x00)) -Type Binary
+#Set-ItemProperty -Path $AccentPath -Name "StartColorMenu" -Value 0xff0e6d0e -Type DWord
 #Set-ItemProperty -Path $PersonalizePath -Name "ColorPrevalence" -Value 1 -Type DWord
 
 # ------------------------------------------------------------------------------
@@ -79,12 +79,6 @@ powercfg /setdcvalueindex SCHEME_CURRENT SUB_NONE OVERLAY_SCHEME_MAX 0
 
 # Apply power configuration changes
 powercfg /setactive SCHEME_CURRENT
-
-# Turn ON Battery Percentage display on taskbar
-If (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage")) {
-    New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage" -Force | Out-Null
-}
-Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage" -Name "ShowBatteryPercentage" -Value 1 -Type DWord
 
 # Screen & System Sleep (Plugged In: Screen 30m, Sleep Never | Battery: Screen 30m, Sleep Never)
 powercfg /change monitor-timeout-ac 30
@@ -108,6 +102,12 @@ powercfg /setdcvalueindex SCHEME_CURRENT 4f971e89-eebd-4455-a8de-9e59040e7347 5c
 
 # Apply Power Scheme Changes
 powercfg /setactive SCHEME_CURRENT
+
+# Turn ON Battery Percentage display on taskbar
+If (-not (Test-Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage")) {
+    New-Item -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage" -Force | Out-Null
+}
+Set-ItemProperty -Path "HKCU:\Software\Microsoft\Windows\CurrentVersion\Control Panel\Settings\BatteryPercentage" -Name "ShowBatteryPercentage" -Value 1 -Type DWord
 
 # ------------------------------------------------------------------------------
 # 5. Mouse Settings (Inverted Cursor, Precision Off, Speed 7)
@@ -213,6 +213,64 @@ if (Test-Path $NotifyIconPath) {
         Set-ItemProperty -Path $_.PSPath -Name "IsPromoted" -Value 1 -Type DWord
     }
 }
+
+# ==============================================================================
+# Windows Explorer Customizations: Extensions, Hidden Items, "My PC", and Views
+# ==============================================================================
+
+Write-Host "Applying Windows Explorer customizations..." -ForegroundColor Cyan
+
+# 1. Show File Name Extensions and Hidden Items
+$explorerAdvanced = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced"
+Set-ItemProperty -Path $explorerAdvanced -Name "HideFileExt" -Value 0 -Type DWord -Force
+Set-ItemProperty -Path $explorerAdvanced -Name "Hidden" -Value 1 -Type DWord -Force
+
+# 2. Rename "This PC" to "My PC"
+$thisPcClsid = "{20D04FE0-3AEA-1069-A2D8-08002B30309D}"
+$thisPcKey = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\CLSID\$thisPcClsid"
+if (-not (Test-Path $thisPcKey)) { New-Item -Path $thisPcKey -Force | Out-Null }
+New-ItemProperty -Path $thisPcKey -Name "(default)" -Value "My PC" -PropertyType String -Force | Out-Null
+
+# 3. Pin "My PC" to Quick Access
+$shell = New-Object -ComObject Shell.Application
+$thisPC = $shell.Namespace(17) # 17 is the Shell Special Folder constant for 'This PC'
+# Invoke the native pinning verb
+$thisPC.Self.InvokeVerb("pintohome")
+
+<# 
+# 4. Set Default Folder View to Sort by Type (and set to Details view)
+Write-Host "Resetting folder view cache and setting default sort to 'Type'..." -ForegroundColor Cyan
+
+# Clear existing folder view cache (BagMRU and Bags) to force the new default on all folders, including C:\
+$bagMru = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\BagMRU"
+$bags = "HKCU:\Software\Classes\Local Settings\Software\Microsoft\Windows\Shell\Bags"
+if (Test-Path $bagMru) { Remove-Item -Path $bagMru -Recurse -Force -ErrorAction SilentlyContinue }
+if (Test-Path $bags) { Remove-Item -Path $bags -Recurse -Force -ErrorAction SilentlyContinue }
+
+# Apply "Sort by Type" (prop:System.ItemTypeText;1) to all standard folder templates
+$folderTypes = @(
+    "{5C4F28B5-F869-4E84-8E60-F11DB97C5CC7}", # Generic (Applies to root drives like C:\)
+    "{7D49D726-3C21-4F05-99AA-FDC2C9474656}", # Documents
+    "{B3690E58-E961-423B-B687-386EBFD83239}", # Pictures
+    "{94D6DDCC-4A68-4175-A374-BD584A510B78}", # Music
+    "{5FA96407-7E77-483C-AC93-691D05850DE8}", # Videos
+    "{885A186E-A440-4ADA-812B-DB871B942259}"  # Downloads
+)
+
+foreach ($type in $folderTypes) {
+    $regPath = "HKCU:\Software\Microsoft\Windows\Shell\Bags\AllFolders\Shell\$type"
+    if (-not (Test-Path $regPath)) { New-Item -Path $regPath -Force | Out-Null }
+    
+    # Sort by Type (Ascending)
+    Set-ItemProperty -Path $regPath -Name "Sort" -Value "prop:System.ItemTypeText;1" -Type String -Force
+    # Set to 'Details' view (LogicalViewMode = 1) so the sorting is visible
+    Set-ItemProperty -Path $regPath -Name "LogicalViewMode" -Value 1 -Type DWord -Force
+}
+ #>
+
+# 5. Restart Explorer to apply CLSID namespace changes, pins, and folder bags
+Write-Host "Restarting Explorer to apply changes..." -ForegroundColor Cyan
+Stop-Process -Name explorer -Force
 
 # ------------------------------------------------------------------------------
 # 7. Default App Removal
